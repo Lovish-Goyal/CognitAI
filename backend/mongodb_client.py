@@ -33,6 +33,12 @@ def mask_uri(uri: str) -> str:
     except Exception:
         return "mongodb://****"
 
+try:
+    import certifi
+    CA_FILE = certifi.where()
+except Exception:
+    CA_FILE = None
+
 _client: Optional[MongoClient] = None
 _db_connected: bool = False
 
@@ -44,12 +50,20 @@ def get_client() -> Optional[MongoClient]:
     uri = get_mongo_uri()
     try:
         if _client is None:
-            _client = MongoClient(uri, serverSelectionTimeoutMS=5000, connectTimeoutMS=5000)
+            kwargs: Dict[str, Any] = {
+                "serverSelectionTimeoutMS": 5000,
+                "connectTimeoutMS": 5000,
+            }
+            if CA_FILE and ("mongodb+srv://" in uri or "ssl=true" in uri.lower() or "tls=true" in uri.lower()):
+                kwargs["tlsCAFile"] = CA_FILE
+            _client = MongoClient(uri, **kwargs)
             _client.admin.command("ping")
             _db_connected = True
         return _client
     except (ConnectionFailure, PyMongoError, Exception) as e:
         print(f"[MongoDB Client Error] {e}")
+        if "SSL" in str(e) or "TLS" in str(e):
+            print("[MongoDB Configuration Notice] Atlas rejected TLS connection. Ensure 0.0.0.0/0 is whitelisted in MongoDB Atlas -> Network Access.")
         _client = None
         _db_connected = False
         return None

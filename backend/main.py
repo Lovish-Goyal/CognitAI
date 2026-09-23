@@ -143,6 +143,11 @@ def startup() -> None:
     except Exception as e:
         print(f"[MongoDB Startup] Deferred connection: {e}")
 
+@app.get("/")
+@app.head("/")
+def root() -> dict[str, str]:
+    return {"status": "ok", "app": "CognitAI Research Core", "version": "2.0"}
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "mode": "research"}
