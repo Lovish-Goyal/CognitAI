@@ -220,6 +220,14 @@ def extract_face_embedding_from_b64(b64_str: str) -> np.ndarray | None:
         img = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR)
         if img is None:
             return None
+
+        # Downscale frame to max 480px on longest dimension to guarantee RAM < 180MB on Render Free Tier
+        h, w = img.shape[:2]
+        max_dim = 480
+        if max(h, w) > max_dim:
+            scale = max_dim / float(max(h, w))
+            img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+
         rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
         face_tensor = None
@@ -306,14 +314,10 @@ def verify_driver(req: DriverVerifyRequest) -> dict[str, object]:
             cand_encrypted = candidate.get("encrypted_embedding") or ""
             cand_len = len(cand_photo)
 
-            # Check in-memory embedding cache
+            # Check in-memory embedding cache first
             cand_vec: np.ndarray | None = None
             if cand_id in driver_embeddings_cache and (cand_len == 0 or driver_embeddings_cache[cand_id][0] == cand_len):
                 cand_vec = driver_embeddings_cache[cand_id][1]
-            elif cand_photo:
-                cand_vec = extract_face_embedding_from_b64(cand_photo)
-                if cand_vec is not None:
-                    driver_embeddings_cache[cand_id] = (cand_len, cand_vec)
             elif cand_encrypted:
                 try:
                     raw_bytes = f.decrypt(cand_encrypted.encode())
@@ -321,9 +325,13 @@ def verify_driver(req: DriverVerifyRequest) -> dict[str, object]:
                     norm = np.linalg.norm(vec)
                     if norm > 0:
                         cand_vec = vec / norm
-                        driver_embeddings_cache[cand_id] = (0, cand_vec)
+                        driver_embeddings_cache[cand_id] = (cand_len, cand_vec)
                 except Exception:
                     pass
+            elif cand_photo:
+                cand_vec = extract_face_embedding_from_b64(cand_photo)
+                if cand_vec is not None:
+                    driver_embeddings_cache[cand_id] = (cand_len, cand_vec)
 
             if cand_vec is not None:
                 sim = float(np.dot(query_vec, cand_vec))

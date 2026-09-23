@@ -287,14 +287,28 @@ export default function EntranceGateway() {
     const video = videoRef.current;
     if (video.videoWidth === 0 || video.videoHeight === 0) return null;
 
+    // Downscale frame to max 480px to optimize bandwidth and cloud memory usage
+    const maxDim = 480;
+    let width = video.videoWidth;
+    let height = video.videoHeight;
+    if (width > maxDim || height > maxDim) {
+      if (width > height) {
+        height = Math.round((height * maxDim) / width);
+        width = maxDim;
+      } else {
+        width = Math.round((width * maxDim) / height);
+        height = maxDim;
+      }
+    }
+
     const tempCanvas = document.createElement("canvas");
-    tempCanvas.width = video.videoWidth;
-    tempCanvas.height = video.videoHeight;
+    tempCanvas.width = width;
+    tempCanvas.height = height;
     const ctx = tempCanvas.getContext("2d");
     if (!ctx) return null;
 
     ctx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
-    return tempCanvas.toDataURL("image/jpeg", 0.9);
+    return tempCanvas.toDataURL("image/jpeg", 0.8);
   }, []);
 
   const handleCaptureRegistrationFace = () => {
@@ -377,10 +391,20 @@ export default function EntranceGateway() {
         }),
       });
 
-      const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.detail || "Biometric authentication failed.");
+        let errorDetail = "Biometric authentication failed.";
+        try {
+          const errData = await res.json();
+          errorDetail = errData.detail || errorDetail;
+        } catch {
+          if (res.status === 502) {
+            errorDetail = "Authentication server is currently restarting. Please retry in 10 seconds or use Quick Demo Sign-In.";
+          }
+        }
+        throw new Error(errorDetail);
       }
+
+      const data = await res.json();
 
       const driverProfile: DriverProfile = {
         driver_id: data.driver_id,
@@ -395,11 +419,13 @@ export default function EntranceGateway() {
       startMonitoring();
     } catch (err: unknown) {
       const e = err as Error;
+      let msg = e.message || "Face not recognized in registry.";
+      if (msg.includes("Unexpected token") || msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
+        msg = "Authentication service temporarily unreachable. Please retry in a few seconds or use Quick Demo Sign-In below.";
+      }
       setAlertModal({
         title: "Biometric Match Notice",
-        message:
-          e.message ||
-          "Face not recognized in registry. You can enroll under 'New Driver' or select an enrolled profile below.",
+        message: msg,
         isError: true,
       });
     } finally {
