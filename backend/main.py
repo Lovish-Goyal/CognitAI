@@ -83,8 +83,14 @@ def initialise() -> None:
             mock_emb1 = (mock_emb1 / np.linalg.norm(mock_emb1)).tobytes()
             mock_emb2 = np.random.randn(512).astype(np.float32)
             mock_emb2 = (mock_emb2 / np.linalg.norm(mock_emb2)).tobytes()
-            conn.execute("INSERT INTO encrypted_driver_profiles VALUES (?, ?, ?, ?)", ("DRIVER-001", "Alex Mercer (Fleet Logistics Lead)", f.encrypt(mock_emb1).decode(), now()))
-            conn.execute("INSERT INTO encrypted_driver_profiles VALUES (?, ?, ?, ?)", ("DRIVER-002", "Sarah Chen (Hazardous Cargo Transport)", f.encrypt(mock_emb2).decode(), now()))
+            conn.execute(
+                "INSERT INTO encrypted_driver_profiles (driver_id, display_name, encrypted_embedding, created_at, photo_base64, license_class) VALUES (?, ?, ?, ?, ?, ?)",
+                ("DRIVER-001", "Alex Mercer (Fleet Logistics Lead)", f.encrypt(mock_emb1).decode(), now(), "", "Commercial Class A"),
+            )
+            conn.execute(
+                "INSERT INTO encrypted_driver_profiles (driver_id, display_name, encrypted_embedding, created_at, photo_base64, license_class) VALUES (?, ?, ?, ?, ?, ?)",
+                ("DRIVER-002", "Sarah Chen (Hazardous Cargo Transport)", f.encrypt(mock_emb2).decode(), now(), "", "Commercial Class A"),
+            )
         # Seed initial breach incidents if table is empty
         cur2 = conn.execute("SELECT COUNT(*) FROM system_breach_indicators")
         if cur2.fetchone()[0] == 0:
@@ -645,7 +651,13 @@ def report_incident(request: ReportIncidentRequest) -> dict[str, str]:
 @app.post("/api/driver-profile")
 async def create_profile(driver_id: str = Form(..., min_length=2, max_length=40), display_name: str = Form(..., min_length=1, max_length=100), image: UploadFile = File(...)):
     vector = embedding(await decode(image)); encrypted = fernet().encrypt(vector.tobytes()).decode()
-    with connection() as conn: conn.execute("INSERT INTO encrypted_driver_profiles VALUES (?, ?, ?, ?) ON CONFLICT(driver_id) DO UPDATE SET display_name=excluded.display_name, encrypted_embedding=excluded.encrypted_embedding, created_at=excluded.created_at", (driver_id.upper(), display_name.strip(), encrypted, now()))
+    with connection() as conn:
+        conn.execute(
+            """INSERT INTO encrypted_driver_profiles (driver_id, display_name, encrypted_embedding, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(driver_id) DO UPDATE SET display_name=excluded.display_name, encrypted_embedding=excluded.encrypted_embedding, created_at=excluded.created_at""",
+            (driver_id.upper(), display_name.strip(), encrypted, now()),
+        )
     return {"status": "PROFILE_SECURED", "driver_id": driver_id.upper()}
 
 @app.post("/api/cognitive-pipeline")
