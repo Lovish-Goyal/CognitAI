@@ -1,0 +1,16 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+python-dotenv==1.0.1
+cryptography==44.0.0
+# facenet-pytorch 2.6 requires NumPy < 2; 1.26 supports Python 3.12.
+numpy==1.26.4
+opencv-python-headless==4.10.0.84
+# facenet-pytorch 2.6.0 declares torch >=2.2.0,<2.3.0.
+torch==2.2.2
+torchvision==0.17.2
+facenet-pytorch==2.6.0
+mediapipe==0.10.21
+scipy==1.14.1
+pymongo==4.10.1
+dnspython==2.7.0

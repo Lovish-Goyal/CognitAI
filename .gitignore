@@ -1,0 +1,59 @@
+# Secrets, Environment Variables & Encryption Keys
+.env
+.env.*
+!.env.example
+*.key
+profile.key
+**/cognitive_data/profile.key
+**/data/*.key
+
+# Python Virtual Environments & Runtimes
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+backend/.venv/
+.venv/
+venv/
+ENV/
+env/
+.pytest_cache/
+.coverage
+
+# Node & Next.js
+node_modules/
+frontend/node_modules/
+frontend/.next/
+.next/
+out/
+build/
+dist/
+.turbo/
+
+# Local Databases & Journals
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+backend/cognitive_data/*.db
+backend/data/
+
+# Logs, System & IDE
+*.log
+npm-debug.log*
+yarn-debug.log*
+.system_generated/
+brain/
+.agents/
+.gemini/
+scratch/
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
