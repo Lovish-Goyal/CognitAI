@@ -297,8 +297,8 @@ export default function EntranceGateway() {
     const video = videoRef.current;
     if (video.videoWidth === 0 || video.videoHeight === 0) return null;
 
-    // Downscale frame to max 480px to optimize bandwidth and cloud memory usage
-    const maxDim = 480;
+    // Optimized downscale to 320px and 0.75 quality for instantaneous cloud upload and sub-second MTCNN inference
+    const maxDim = 320;
     let width = video.videoWidth;
     let height = video.videoHeight;
     if (width > maxDim || height > maxDim) {
@@ -318,7 +318,7 @@ export default function EntranceGateway() {
     if (!ctx) return null;
 
     ctx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
-    return tempCanvas.toDataURL("image/jpeg", 0.8);
+    return tempCanvas.toDataURL("image/jpeg", 0.75);
   }, []);
 
   const handleCaptureRegistrationFace = () => {
@@ -390,7 +390,7 @@ export default function EntranceGateway() {
 
     setLoginVerifying(true);
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
 
     try {
       const res = await fetch(`${getApiBaseUrl()}/api/driver-login`, {
@@ -411,7 +411,7 @@ export default function EntranceGateway() {
           errorDetail = errData.detail || errorDetail;
         } catch {
           if (res.status === 502) {
-            errorDetail = "Authentication server is currently restarting. Please retry in 10 seconds or use Quick Demo Sign-In.";
+            errorDetail = "Authentication server is currently waking up or restarting. Please retry in 10 seconds or use Quick Demo Sign-In.";
           }
         }
         throw new Error(errorDetail);
@@ -439,7 +439,7 @@ export default function EntranceGateway() {
       const e = err as Error;
       let msg = e.message || "Face not recognized in registry.";
       if (e.name === "AbortError") {
-        msg = "Authentication request timed out. Please check your camera connection or use Quick Demo Sign-In.";
+        msg = "Authentication request timed out. The cloud server may be waking up from cold sleep (takes ~15-20s on Free Tier). Please click once more to retry, or use Quick Demo Sign-In.";
       } else if (msg.includes("Unexpected token") || msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
         msg = "Authentication service temporarily unreachable. Ensure backend is running or select a profile below.";
       }
@@ -510,7 +510,7 @@ export default function EntranceGateway() {
 
     setRegSubmitting(true);
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
 
     try {
       const payload = {
@@ -568,7 +568,7 @@ export default function EntranceGateway() {
       const e = err as Error;
       let msg = e.message || "Failed to register driver profile. Please try again.";
       if (e.name === "AbortError") {
-        msg = "Registration timed out. Please verify your camera frame and retry.";
+        msg = "Registration timed out. The cloud server may be waking up from cold sleep (takes ~15-20s on Free Tier). Please click once more to retry.";
       }
       setAlertModal({
         title: "Registration Notice",
