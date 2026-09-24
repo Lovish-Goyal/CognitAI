@@ -9,6 +9,9 @@ export const metadata: Metadata = {
   title: "CognitAI - Autonomous Driver Attentiveness & Bio-Telemetry Console",
   description:
     "Real-time driver fatigue detection, rPPG cardiovascular telemetry, spatial gaze monitoring, and anti-spoof protection.",
+  icons: {
+    icon: "/favicon.ico",
+  },
 };
 
 export default function RootLayout({
