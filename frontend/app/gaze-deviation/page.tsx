@@ -1,9 +1,9 @@
 "use client";
 
-import { FaceMesh, Results } from "@mediapipe/face_mesh";
+import type { FaceMesh, Results } from "@mediapipe/face_mesh";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { requestWebcamStream, releaseWebcamStream } from "../utils/camera";
-import { getFaceMeshLocateFile } from "../utils/mediapipe";
+import { getSharedFaceMesh, setSharedFaceMeshCallback } from "../utils/mediapipe";
 import { selectPrimaryDriverFace, smoothMetric } from "../utils/faceProcessing";
 import { CameraFaceOverlay } from "../components/CameraFaceOverlay";
 
@@ -110,18 +110,10 @@ export default function GazeDeviation() {
       setCameraError(null);
 
       if (!meshRef.current) {
-        const mesh = new FaceMesh({
-          locateFile: getFaceMeshLocateFile,
-        });
+        const mesh = await getSharedFaceMesh();
+        meshRef.current = mesh;
 
-        mesh.setOptions({
-          maxNumFaces: 3,
-          refineLandmarks: true,
-          minDetectionConfidence: 0.4,
-          minTrackingConfidence: 0.4,
-        });
-
-        mesh.onResults((result: Results) => {
+        setSharedFaceMeshCallback((result: Results) => {
           // Select only the dominant front driver face, ignoring background faces/passengers
           const p = selectPrimaryDriverFace(result.multiFaceLandmarks);
           const canvas = overlayCanvasRef.current;
@@ -316,12 +308,6 @@ export default function GazeDeviation() {
           }
         });
 
-        try {
-          await mesh.initialize();
-        } catch (e) {
-          console.warn("[GazeDeviation] FaceMesh initialize error (will proceed):", e);
-        }
-
         meshRef.current = mesh;
       }
 
@@ -347,8 +333,8 @@ export default function GazeDeviation() {
               await v.play().catch(() => {});
             }
             await meshRef.current.send({ image: v });
-          } catch (err) {
-            console.warn("[GazeDeviation] FaceMesh send error:", err);
+          } catch {
+            // Frame dropped safely
           } finally {
             isProcessingRef.current = false;
           }

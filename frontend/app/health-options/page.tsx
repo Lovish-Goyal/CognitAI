@@ -1,9 +1,9 @@
 "use client";
 
-import { FaceMesh, Results } from "@mediapipe/face_mesh";
+import type { FaceMesh, Results } from "@mediapipe/face_mesh";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { requestWebcamStream, releaseWebcamStream } from "../utils/camera";
-import { getFaceMeshLocateFile } from "../utils/mediapipe";
+import { getSharedFaceMesh, setSharedFaceMeshCallback } from "../utils/mediapipe";
 import {
   selectPrimaryDriverFace,
   smoothMetric,
@@ -16,7 +16,8 @@ import {
 import { CameraFaceOverlay } from "../components/CameraFaceOverlay";
 import { useMonitoring } from "../context/MonitoringContext";
 
-const API = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+import { getApiBaseUrl } from "../utils/api";
+const API = getApiBaseUrl();
 
 const distance = (a: { x: number; y: number }, b: { x: number; y: number }) =>
   Math.hypot(a.x - b.x, a.y - b.y);
@@ -129,18 +130,10 @@ export default function HealthOptionsPage() {
         setCameraError(null);
 
         if (!meshRef.current) {
-          const mesh = new FaceMesh({
-            locateFile: getFaceMeshLocateFile,
-          });
+          const mesh = await getSharedFaceMesh();
+          meshRef.current = mesh;
 
-          mesh.setOptions({
-            maxNumFaces: 3,
-            refineLandmarks: true,
-            minDetectionConfidence: 0.4,
-            minTrackingConfidence: 0.4,
-          });
-
-          mesh.onResults((result: Results) => {
+          setSharedFaceMeshCallback((result: Results) => {
             const landmarks = selectPrimaryDriverFace(result.multiFaceLandmarks);
             const canvas = overlayRef.current;
             const source = videoRef.current;
@@ -300,12 +293,6 @@ export default function HealthOptionsPage() {
             }
           });
 
-          try {
-            await mesh.initialize();
-          } catch (e) {
-            console.warn("[HealthOptions] FaceMesh initialize error:", e);
-          }
-
           meshRef.current = mesh;
         }
 
@@ -331,8 +318,8 @@ export default function HealthOptionsPage() {
                 await v.play().catch(() => {});
               }
               await meshRef.current.send({ image: v });
-            } catch (err) {
-              console.warn("[HealthOptions] FaceMesh send error:", err);
+            } catch {
+              // Frame dropped safely
             } finally {
               isProcessingRef.current = false;
             }

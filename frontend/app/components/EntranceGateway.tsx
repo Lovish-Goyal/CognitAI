@@ -1,12 +1,13 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { FaceMesh, Results, FACEMESH_CONTOURS } from "@mediapipe/face_mesh";
+import { FACEMESH_CONTOURS } from "@mediapipe/face_mesh";
+import type { FaceMesh, Results } from "@mediapipe/face_mesh";
 import { requestWebcamStream, releaseWebcamStream } from "../utils/camera";
-import { getFaceMeshLocateFile } from "../utils/mediapipe";
+import { getSharedFaceMesh, setSharedFaceMeshCallback } from "../utils/mediapipe";
 import { useMonitoring, DriverProfile } from "../context/MonitoringContext";
 
-const API = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+import { getApiBaseUrl } from "../utils/api";
 
 interface DbStatus {
   database: string;
@@ -70,8 +71,7 @@ export default function EntranceGateway() {
   const [verifiedDriver, setVerifiedDriver] = useState<DriverProfile | null>(null);
 
   // --- REGISTRATION STATE ---
-  const [regName, setRegName] = useState<string>("Alex Mercer");
-  const [regLicense, setRegLicense] = useState<string>("Commercial Class A");
+  const [regName, setRegName] = useState<string>("");
   const [regPhoto, setRegPhoto] = useState<string>("");
   const [regSubmitting, setRegSubmitting] = useState<boolean>(false);
 
@@ -87,11 +87,13 @@ export default function EntranceGateway() {
   const isScanningRef = useRef<boolean>(false);
   const isProcessingRef = useRef<boolean>(false);
   const lastFrameTimeRef = useRef<number>(0);
+  const animFrameRef = useRef<number | null>(null);
+  const unbindMeshRef = useRef<(() => void) | null>(null);
 
   const [cameraActive, setCameraActive] = useState<boolean>(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
-  const [faceInFrame, setFaceInFrame] = useState<boolean>(false);
-  const faceInFrameRef = useRef<boolean>(false);
+  const [faceInFrame, setFaceInFrame] = useState<boolean>(true);
+  const faceInFrameRef = useRef<boolean>(true);
   useEffect(() => {
     faceInFrameRef.current = faceInFrame;
   }, [faceInFrame]);
@@ -102,7 +104,7 @@ export default function EntranceGateway() {
   const [enrolledDrivers, setEnrolledDrivers] = useState<EnrolledDriverItem[]>(DEFAULT_FLEET_DRIVERS);
 
   const fetchDbStatus = useCallback(() => {
-    fetch(`${API}/api/db-status`)
+    fetch(`${getApiBaseUrl()}/api/db-status`)
       .then((r) => r.json())
       .then((data: DbStatus) => setDbStatus(data))
       .catch(() => {
@@ -117,7 +119,7 @@ export default function EntranceGateway() {
   }, []);
 
   const fetchEnrolledDrivers = useCallback(() => {
-    fetch(`${API}/api/drivers?limit=10`)
+    fetch(`${getApiBaseUrl()}/api/drivers?limit=10`)
       .then((r) => r.json())
       .then((data) => {
         if (data && Array.isArray(data.drivers) && data.drivers.length > 0) {
@@ -155,85 +157,87 @@ export default function EntranceGateway() {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         try {
-          await videoRef.current.play();
-        } catch (e) {
-          console.warn("Entrance camera play notice:", e);
+          if (videoRef.current.paused) {
+            await videoRef.current.play();
+          }
+        } catch (e: any) {
+          if (e?.name !== "AbortError") {
+            console.warn("Entrance camera play notice:", e);
+          }
         }
       }
       setCameraActive(true);
+      faceInFrameRef.current = true;
+      setFaceInFrame(true);
       isScanningRef.current = true;
 
       try {
-        if (!meshRef.current) {
-          const fm = new FaceMesh({ locateFile: getFaceMeshLocateFile });
-          fm.setOptions({
-            maxNumFaces: 1,
-            refineLandmarks: true,
-            minDetectionConfidence: 0.4,
-            minTrackingConfidence: 0.4,
-          });
+        const fm = await getSharedFaceMesh();
+        meshRef.current = fm;
 
-          fm.onResults((results: Results) => {
-            const canvas = canvasRef.current;
-            const video = videoRef.current;
-            if (!canvas || !video) return;
+        if (unbindMeshRef.current) {
+          unbindMeshRef.current();
+        }
 
-            const ctx = canvas.getContext("2d");
-            if (!ctx) return;
+        unbindMeshRef.current = setSharedFaceMeshCallback((results: Results) => {
+          const canvas = canvasRef.current;
+          const video = videoRef.current;
+          if (!canvas || !video) return;
 
-            if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-              canvas.width = video.videoWidth || 640;
-              canvas.height = video.videoHeight || 480;
-            }
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return;
 
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+          if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+            canvas.width = video.videoWidth || 640;
+            canvas.height = video.videoHeight || 480;
+          }
 
-            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-              faceInFrameRef.current = true;
-              setFaceInFrame(true);
-              const landmarks = results.multiFaceLandmarks[0];
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-              // Draw subtle, elegant mesh contours
-              ctx.strokeStyle = "rgba(0, 102, 204, 0.4)";
-              ctx.lineWidth = 0.8;
+          if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+            faceInFrameRef.current = true;
+            setFaceInFrame(true);
+            const landmarks = results.multiFaceLandmarks[0];
 
-              if (FACEMESH_CONTOURS) {
-                for (const [start, end] of FACEMESH_CONTOURS) {
-                  const p1 = landmarks[start];
-                  const p2 = landmarks[end];
-                  if (p1 && p2) {
-                    ctx.beginPath();
-                    ctx.moveTo(p1.x * canvas.width, p1.y * canvas.height);
-                    ctx.lineTo(p2.x * canvas.width, p2.y * canvas.height);
-                    ctx.stroke();
-                  }
+            // Draw subtle, elegant mesh contours
+            ctx.strokeStyle = "rgba(0, 102, 204, 0.4)";
+            ctx.lineWidth = 0.8;
+
+            if (FACEMESH_CONTOURS) {
+              for (const [start, end] of FACEMESH_CONTOURS) {
+                const p1 = landmarks[start];
+                const p2 = landmarks[end];
+                if (p1 && p2) {
+                  ctx.beginPath();
+                  ctx.moveTo(p1.x * canvas.width, p1.y * canvas.height);
+                  ctx.lineTo(p2.x * canvas.width, p2.y * canvas.height);
+                  ctx.stroke();
                 }
               }
-
-              // Subtle landmark points
-              ctx.fillStyle = "rgba(16, 185, 129, 0.85)";
-              for (let i = 0; i < landmarks.length; i += 8) {
-                const pt = landmarks[i];
-                ctx.beginPath();
-                ctx.arc(pt.x * canvas.width, pt.y * canvas.height, 1.2, 0, 2 * Math.PI);
-                ctx.fill();
-              }
-            } else {
-              faceInFrameRef.current = false;
-              setFaceInFrame(false);
             }
-          });
 
-          meshRef.current = fm;
-        }
+            // Subtle landmark points
+            ctx.fillStyle = "rgba(16, 185, 129, 0.85)";
+            for (let i = 0; i < landmarks.length; i += 8) {
+              const pt = landmarks[i];
+              ctx.beginPath();
+              ctx.arc(pt.x * canvas.width, pt.y * canvas.height, 1.2, 0, 2 * Math.PI);
+              ctx.fill();
+            }
+          }
+        });
       } catch (meshErr) {
         console.warn("FaceMesh setup notice:", meshErr);
       }
 
-      let animId: number;
+      if (animFrameRef.current) {
+        cancelAnimationFrame(animFrameRef.current);
+      }
+
       const processLoop = async (time: number) => {
         if (!isScanningRef.current) return;
 
+        // Throttled to a lightweight 15 FPS (every ~66ms) to keep UI 100% smooth
         if (time - lastFrameTimeRef.current >= 66) {
           lastFrameTimeRef.current = time;
           if (videoRef.current && videoRef.current.readyState >= 2 && !isProcessingRef.current) {
@@ -249,13 +253,11 @@ export default function EntranceGateway() {
             }
           }
         }
-        animId = requestAnimationFrame(processLoop);
+        if (isScanningRef.current) {
+          animFrameRef.current = requestAnimationFrame(processLoop);
+        }
       };
-      animId = requestAnimationFrame(processLoop);
-
-      return () => {
-        cancelAnimationFrame(animId);
-      };
+      animFrameRef.current = requestAnimationFrame(processLoop);
     } catch (err: unknown) {
       const e = err as Error;
       setCameraError(e.message || "Failed to initialize optical sensor.");
@@ -265,6 +267,14 @@ export default function EntranceGateway() {
 
   const stopCamera = useCallback(() => {
     isScanningRef.current = false;
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+    if (unbindMeshRef.current) {
+      unbindMeshRef.current();
+      unbindMeshRef.current = null;
+    }
     if (streamRef.current) {
       releaseWebcamStream(streamRef.current);
       streamRef.current = null;
@@ -358,15 +368,6 @@ export default function EntranceGateway() {
       return;
     }
 
-    if (!faceInFrameRef.current) {
-      setAlertModal({
-        title: "Center Face to Authenticate",
-        message: "Please look directly at the camera so your biometric features can be scanned.",
-        isError: true,
-      });
-      return;
-    }
-
     setFlashActive(true);
     setTimeout(() => setFlashActive(false), 150);
 
@@ -380,16 +381,28 @@ export default function EntranceGateway() {
       return;
     }
 
+    // Temporarily pause FaceMesh animation loop to dedicate 100% CPU to authentication
+    isScanningRef.current = false;
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+
     setLoginVerifying(true);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
     try {
-      const res = await fetch(`${API}/api/driver-login`, {
+      const res = await fetch(`${getApiBaseUrl()}/api/driver-login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           face_photo_base64: currentFrame,
           photo_base64: currentFrame,
         }),
       });
+      clearTimeout(timeoutId);
 
       if (!res.ok) {
         let errorDetail = "Biometric authentication failed.";
@@ -409,7 +422,7 @@ export default function EntranceGateway() {
       const driverProfile: DriverProfile = {
         driver_id: data.driver_id,
         display_name: data.display_name,
-        license_class: data.license_class || "Commercial Class A",
+        license_class: data.license_class || "Standard Driver",
         photo_base64: currentFrame,
         status: "Active / Verified",
       };
@@ -418,10 +431,17 @@ export default function EntranceGateway() {
       setCurrentDriver(driverProfile);
       startMonitoring();
     } catch (err: unknown) {
+      clearTimeout(timeoutId);
+      // Resume scanning on failure
+      isScanningRef.current = true;
+      startCameraScan();
+
       const e = err as Error;
       let msg = e.message || "Face not recognized in registry.";
-      if (msg.includes("Unexpected token") || msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
-        msg = "Authentication service temporarily unreachable. Please retry in a few seconds or use Quick Demo Sign-In below.";
+      if (e.name === "AbortError") {
+        msg = "Authentication request timed out. Please check your camera connection or use Quick Demo Sign-In.";
+      } else if (msg.includes("Unexpected token") || msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
+        msg = "Authentication service temporarily unreachable. Ensure backend is running or select a profile below.";
       }
       setAlertModal({
         title: "Biometric Match Notice",
@@ -466,14 +486,6 @@ export default function EntranceGateway() {
 
     let photoToUse = regPhoto;
     if (!photoToUse && cameraActive) {
-      if (!faceInFrameRef.current) {
-        setAlertModal({
-          title: "Align Face to Register",
-          message: "Please center your face directly in front of the camera so your biometric profile can be generated.",
-          isError: true,
-        });
-        return;
-      }
       photoToUse = captureFrameBase64() || "";
       if (photoToUse) {
         setRegPhoto(photoToUse);
@@ -489,19 +501,31 @@ export default function EntranceGateway() {
       return;
     }
 
+    // Temporarily pause FaceMesh loop to dedicate 100% CPU to registration payload & FaceNet
+    isScanningRef.current = false;
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+
     setRegSubmitting(true);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
     try {
       const payload = {
         display_name: regName.trim(),
-        license_class: regLicense,
+        license_class: "Standard Driver",
         photo_base64: photoToUse,
       };
 
-      const res = await fetch(`${API}/api/driver-register`, {
+      const res = await fetch(`${getApiBaseUrl()}/api/driver-register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify(payload),
       });
+      clearTimeout(timeoutId);
 
       const data = await res.json();
       if (!res.ok) {
@@ -511,7 +535,7 @@ export default function EntranceGateway() {
       const newDriver: DriverProfile = {
         driver_id: data.driver_id,
         display_name: data.display_name,
-        license_class: data.license_class || regLicense,
+        license_class: data.license_class || "Standard Driver",
         photo_base64: photoToUse,
         status: "Active / Verified",
       };
@@ -526,19 +550,29 @@ export default function EntranceGateway() {
         {
           driver_id: data.driver_id,
           display_name: data.display_name,
-          license_class: data.license_class || regLicense,
+          license_class: data.license_class || "Standard Driver",
           status: "Active / Verified",
         },
         ...prev.filter((d) => d.driver_id !== data.driver_id),
       ]);
 
+      // Refresh DB count in background without blocking UI
       fetchDbStatus();
       fetchEnrolledDrivers();
     } catch (err: unknown) {
+      clearTimeout(timeoutId);
+      // Resume scanning on failure
+      isScanningRef.current = true;
+      startCameraScan();
+
       const e = err as Error;
+      let msg = e.message || "Failed to register driver profile. Please try again.";
+      if (e.name === "AbortError") {
+        msg = "Registration timed out. Please verify your camera frame and retry.";
+      }
       setAlertModal({
         title: "Registration Notice",
-        message: e.message || "Failed to register driver profile. Please try again.",
+        message: msg,
         isError: true,
       });
     } finally {
@@ -1095,7 +1129,7 @@ export default function EntranceGateway() {
                 </button>
               </div>
 
-              {/* Full Name */}
+              {/* Driver Full Name */}
               <div>
                 <label
                   htmlFor="reg-name"
@@ -1109,30 +1143,9 @@ export default function EntranceGateway() {
                   required
                   value={regName}
                   onChange={(e) => setRegName(e.target.value)}
-                  placeholder="e.g. Captain Marcus Vance"
+                  placeholder="Enter Your Name"
                   className="w-full px-3 py-1.5 text-xs sm:text-sm bg-white border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition shadow-sm"
                 />
-              </div>
-
-              {/* License Class */}
-              <div>
-                <label
-                  htmlFor="reg-license"
-                  className="block text-xs font-semibold text-slate-700 mb-1 uppercase tracking-wider"
-                >
-                  License Class
-                </label>
-                <select
-                  id="reg-license"
-                  value={regLicense}
-                  onChange={(e) => setRegLicense(e.target.value)}
-                  className="w-full px-3 py-1.5 text-xs sm:text-sm bg-white border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition shadow-sm"
-                >
-                  <option value="Commercial Class A">Commercial Class A (Heavy Transport)</option>
-                  <option value="Commercial Class B">Commercial Class B (Regional Bus/Freight)</option>
-                  <option value="Hazardous Cargo">Hazardous Cargo (HazMat Certified)</option>
-                  <option value="Autonomous Fleet Pilot">Autonomous Fleet Pilot (Level 4 Safety)</option>
-                </select>
               </div>
 
               {/* Submit Enrollment */}

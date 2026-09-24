@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { FaceMesh, Results, FACEMESH_TESSELATION, FACEMESH_CONTOURS } from "@mediapipe/face_mesh";
+import { FACEMESH_TESSELATION, FACEMESH_CONTOURS } from "@mediapipe/face_mesh";
+import type { FaceMesh, Results } from "@mediapipe/face_mesh";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { requestWebcamStream, releaseWebcamStream } from "./utils/camera";
-import { getFaceMeshLocateFile } from "./utils/mediapipe";
+import { getSharedFaceMesh, setSharedFaceMeshCallback } from "./utils/mediapipe";
 import {
   selectPrimaryDriverFace,
   smoothMetric,
@@ -18,7 +19,8 @@ import { CameraFaceOverlay } from "./components/CameraFaceOverlay";
 import { useMonitoring } from "./context/MonitoringContext";
 import EntranceGateway from "./components/EntranceGateway";
 
-const API = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+import { getApiBaseUrl } from "./utils/api";
+const API = getApiBaseUrl();
 
 const distance = (a: { x: number; y: number }, b: { x: number; y: number }) =>
   Math.hypot(a.x - b.x, a.y - b.y);
@@ -53,6 +55,8 @@ export default function Dashboard() {
   const pulseCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const meshRef = useRef<FaceMesh | null>(null);
+  const animLoopIdRef = useRef<number | null>(null);
+  const unbindMeshRef = useRef<(() => void) | null>(null);
   const runningRef = useRef<boolean>(false);
   const connectingPromiseRef = useRef<Promise<boolean> | null>(null);
   const isProcessingRef = useRef(false);
@@ -330,12 +334,20 @@ export default function Dashboard() {
       const v = videoRef.current;
       v.srcObject = stream;
       try {
-        await v.play();
-      } catch (e) {
-        console.warn("Direct webcam play error, waiting for event:", e);
+        if (v.paused) {
+          await v.play();
+        }
+      } catch (e: any) {
+        if (e?.name !== "AbortError") {
+          console.warn("Direct webcam play error, waiting for event:", e);
+        }
       }
       v.onloadedmetadata = () => {
-        void v.play();
+        if (v.paused) {
+          void v.play().catch((e: any) => {
+            if (e?.name !== "AbortError") console.warn("Video play error:", e);
+          });
+        }
         if (landmarkCanvasRef.current) {
           landmarkCanvasRef.current.width = v.videoWidth || 960;
           landmarkCanvasRef.current.height = v.videoHeight || 540;
@@ -350,20 +362,17 @@ export default function Dashboard() {
     setCameraActive(true);
     setCameraError(null);
 
-    // Initialize FaceMesh instance if not already created
+    // Initialize Shared FaceMesh instance if not already acquired
     if (!meshRef.current) {
-      const mesh = new FaceMesh({
-        locateFile: getFaceMeshLocateFile,
-      });
+      const mesh = await getSharedFaceMesh();
+      meshRef.current = mesh;
 
-      mesh.setOptions({
-        maxNumFaces: 3,
-        refineLandmarks: true,
-        minDetectionConfidence: 0.4,
-        minTrackingConfidence: 0.4,
-      });
+      if (unbindMeshRef.current) {
+        unbindMeshRef.current();
+      }
 
-      mesh.onResults((result: Results) => {
+      unbindMeshRef.current = setSharedFaceMeshCallback((result: Results) => {
+        if (!runningRef.current) return;
         // Select only the dominant front driver face, ignoring background faces/passengers
         const p = selectPrimaryDriverFace(result.multiFaceLandmarks);
 
@@ -672,12 +681,6 @@ export default function Dashboard() {
         }
       });
 
-      try {
-          await mesh.initialize();
-        } catch (e) {
-          console.warn("[CognitAI] FaceMesh initialize error (will proceed):", e);
-        }
-
         meshRef.current = mesh;
       }
 
@@ -685,6 +688,10 @@ export default function Dashboard() {
       runningRef.current = true;
       const targetFPS = 25;
       const frameInterval = 1000 / targetFPS;
+
+      if (animLoopIdRef.current) {
+        cancelAnimationFrame(animLoopIdRef.current);
+      }
 
       const loop = async (timestamp: number) => {
         if (!runningRef.current) return;
@@ -704,17 +711,17 @@ export default function Dashboard() {
               await v.play().catch(() => {});
             }
             await meshRef.current.send({ image: v });
-          } catch (err) {
-            console.warn("[CognitAI] FaceMesh send error:", err);
+          } catch {
+            // Frame dropped safely
           } finally {
             isProcessingRef.current = false;
           }
         }
         if (runningRef.current) {
-          requestAnimationFrame(loop);
+          animLoopIdRef.current = requestAnimationFrame(loop);
         }
       };
-      requestAnimationFrame(loop);
+      animLoopIdRef.current = requestAnimationFrame(loop);
 
         return true;
       } finally {
@@ -731,6 +738,14 @@ export default function Dashboard() {
       void connectCamera();
     } else {
       runningRef.current = false;
+      if (animLoopIdRef.current) {
+        cancelAnimationFrame(animLoopIdRef.current);
+        animLoopIdRef.current = null;
+      }
+      if (unbindMeshRef.current) {
+        unbindMeshRef.current();
+        unbindMeshRef.current = null;
+      }
       setIsHeadDown(false);
       isHeadDownRef.current = false;
       if (streamRef.current) {

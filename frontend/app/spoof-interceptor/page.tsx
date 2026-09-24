@@ -1,13 +1,14 @@
 "use client";
 
-import { FaceMesh, Results } from "@mediapipe/face_mesh";
+import type { FaceMesh, Results } from "@mediapipe/face_mesh";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { requestWebcamStream, releaseWebcamStream } from "../utils/camera";
-import { getFaceMeshLocateFile } from "../utils/mediapipe";
+import { getSharedFaceMesh, setSharedFaceMeshCallback } from "../utils/mediapipe";
 import { selectPrimaryDriverFace, smoothMetric } from "../utils/faceProcessing";
 import { CameraFaceOverlay } from "../components/CameraFaceOverlay";
 
-const API = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+import { getApiBaseUrl } from "../utils/api";
+const API = getApiBaseUrl();
 
 type Incident = { timestamp: string; vector: string; confidence: string };
 type Profile = { driver_id: string; display_name: string; ciphertext: string; created_at?: string };
@@ -133,18 +134,10 @@ export default function SpoofInterceptor() {
       setCameraError(null);
 
       if (!meshRef.current) {
-        const mesh = new FaceMesh({
-          locateFile: getFaceMeshLocateFile,
-        });
+        const mesh = await getSharedFaceMesh();
+        meshRef.current = mesh;
 
-        mesh.setOptions({
-          maxNumFaces: 3,
-          refineLandmarks: true,
-          minDetectionConfidence: 0.4,
-          minTrackingConfidence: 0.4,
-        });
-
-        mesh.onResults((result: Results) => {
+        setSharedFaceMeshCallback((result: Results) => {
           // Select only the dominant front driver face, ignoring background faces/passengers
           const p = selectPrimaryDriverFace(result.multiFaceLandmarks);
           const canvas = meshCanvasRef.current;
@@ -219,12 +212,6 @@ export default function SpoofInterceptor() {
           ctx.fill();
         });
 
-        try {
-          await mesh.initialize();
-        } catch (e) {
-          console.warn("[SpoofInterceptor] FaceMesh initialize error (will proceed):", e);
-        }
-
         meshRef.current = mesh;
       }
 
@@ -250,8 +237,8 @@ export default function SpoofInterceptor() {
               await v.play().catch(() => {});
             }
             await meshRef.current.send({ image: v });
-          } catch (err) {
-            console.warn("[SpoofInterceptor] FaceMesh send error:", err);
+          } catch {
+            // Frame dropped safely
           } finally {
             isProcessingRef.current = false;
           }

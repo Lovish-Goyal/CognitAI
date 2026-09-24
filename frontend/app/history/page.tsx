@@ -4,7 +4,8 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { useMonitoring } from "../context/MonitoringContext";
 
-const API = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+import { getApiBaseUrl } from "../utils/api";
+const API = getApiBaseUrl();
 
 interface AuditRecord {
   id: string;

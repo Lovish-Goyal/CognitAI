@@ -1,9 +1,9 @@
 "use client";
 
-import { FaceMesh, Results } from "@mediapipe/face_mesh";
+import type { FaceMesh, Results } from "@mediapipe/face_mesh";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { requestWebcamStream, releaseWebcamStream } from "../utils/camera";
-import { getFaceMeshLocateFile } from "../utils/mediapipe";
+import { getSharedFaceMesh, setSharedFaceMeshCallback } from "../utils/mediapipe";
 import {
   selectPrimaryDriverFace,
   smoothMetric,
@@ -113,18 +113,10 @@ export default function StressAnalytics() {
       setCameraError(null);
 
       if (!meshRef.current) {
-        const mesh = new FaceMesh({
-          locateFile: getFaceMeshLocateFile,
-        });
+        const mesh = await getSharedFaceMesh();
+        meshRef.current = mesh;
 
-        mesh.setOptions({
-          maxNumFaces: 3,
-          refineLandmarks: true,
-          minDetectionConfidence: 0.4,
-          minTrackingConfidence: 0.4,
-        });
-
-        mesh.onResults((result: Results) => {
+        setSharedFaceMeshCallback((result: Results) => {
           // Select strictly the primary front driver face and ignore background passengers
           const landmarks = selectPrimaryDriverFace(result.multiFaceLandmarks);
           const canvas = overlayRef.current;
@@ -301,12 +293,6 @@ export default function StressAnalytics() {
           }
         });
 
-        try {
-          await mesh.initialize();
-        } catch (e) {
-          console.warn("[StressAnalytics] FaceMesh initialize error (will proceed):", e);
-        }
-
         meshRef.current = mesh;
       }
 
@@ -332,8 +318,8 @@ export default function StressAnalytics() {
               await v.play().catch(() => {});
             }
             await meshRef.current.send({ image: v });
-          } catch (err) {
-            console.warn("[StressAnalytics] FaceMesh send error:", err);
+          } catch {
+            // Frame dropped safely
           } finally {
             isProcessingRef.current = false;
           }

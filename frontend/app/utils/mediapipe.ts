@@ -35,3 +35,73 @@ export function getFaceMeshLocateFile(file: string): string {
   // Use locally served assets from Next.js public directory
   return `/mediapipe/face_mesh/${file}`;
 }
+
+let sharedMeshInstance: FaceMesh | null = null;
+let sharedMeshInitPromise: Promise<FaceMesh> | null = null;
+let activeResultsCallback: ((results: Results) => void) | null = null;
+
+import type { FaceMesh, Results } from "@mediapipe/face_mesh";
+
+/**
+ * Returns the singleton FaceMesh instance, creating and initializing it once.
+ */
+export async function getSharedFaceMesh(): Promise<FaceMesh> {
+  if (sharedMeshInstance) {
+    return sharedMeshInstance;
+  }
+
+  if (sharedMeshInitPromise) {
+    return sharedMeshInitPromise;
+  }
+
+  sharedMeshInitPromise = (async () => {
+    try {
+      const { FaceMesh } = await import("@mediapipe/face_mesh");
+      const fm = new FaceMesh({ locateFile: getFaceMeshLocateFile });
+      fm.setOptions({
+        maxNumFaces: 3,
+        refineLandmarks: true,
+        minDetectionConfidence: 0.4,
+        minTrackingConfidence: 0.4,
+      });
+
+      fm.onResults((results: Results) => {
+        if (activeResultsCallback) {
+          try {
+            activeResultsCallback(results);
+          } catch {
+            // Callback execution caught safely
+          }
+        }
+      });
+
+      try {
+        await fm.initialize();
+      } catch {
+        // Initialization completes on first frame send
+      }
+
+      sharedMeshInstance = fm;
+      return fm;
+    } catch (err) {
+      sharedMeshInitPromise = null;
+      throw err;
+    }
+  })();
+
+  return sharedMeshInitPromise;
+}
+
+/**
+ * Binds the active onResults callback to the shared FaceMesh singleton.
+ * Returns an unbind function for clean component unmounts.
+ */
+export function setSharedFaceMeshCallback(callback: (results: Results) => void): () => void {
+  activeResultsCallback = callback;
+  return () => {
+    if (activeResultsCallback === callback) {
+      activeResultsCallback = null;
+    }
+  };
+}
+

@@ -39,31 +39,43 @@ try:
 except Exception:
     CA_FILE = None
 
+import time
+
 _client: Optional[MongoClient] = None
 _db_connected: bool = False
+_last_failure_timestamp: float = 0.0
+CIRCUIT_OPEN_SECONDS = 45.0
 
 def get_client() -> Optional[MongoClient]:
-    global _client, _db_connected
+    global _client, _db_connected, _last_failure_timestamp
     if not PYMONGO_AVAILABLE or MongoClient is None:
         _db_connected = False
         return None
+    if _client is not None and _db_connected:
+        return _client
+    # If recent connection attempt failed, do NOT block for timeout again - return None immediately (0ms)
+    if _last_failure_timestamp > 0 and (time.time() - _last_failure_timestamp) < CIRCUIT_OPEN_SECONDS:
+        return None
+
     uri = get_mongo_uri()
     try:
-        if _client is None:
-            kwargs: Dict[str, Any] = {
-                "serverSelectionTimeoutMS": 5000,
-                "connectTimeoutMS": 5000,
-            }
-            if CA_FILE and ("mongodb+srv://" in uri or "ssl=true" in uri.lower() or "tls=true" in uri.lower()):
-                kwargs["tlsCAFile"] = CA_FILE
-            _client = MongoClient(uri, **kwargs)
-            _client.admin.command("ping")
-            _db_connected = True
+        kwargs: Dict[str, Any] = {
+            "serverSelectionTimeoutMS": 1500,
+            "connectTimeoutMS": 1500,
+            "socketTimeoutMS": 2000,
+        }
+        if CA_FILE and ("mongodb+srv://" in uri or "ssl=true" in uri.lower() or "tls=true" in uri.lower()):
+            kwargs["tlsCAFile"] = CA_FILE
+        _client = MongoClient(uri, **kwargs)
+        _client.admin.command("ping")
+        _db_connected = True
+        _last_failure_timestamp = 0.0
         return _client
     except (ConnectionFailure, PyMongoError, Exception) as e:
         print(f"[MongoDB Client Error] {e}")
         if "SSL" in str(e) or "TLS" in str(e):
             print("[MongoDB Configuration Notice] Atlas rejected TLS connection. Ensure 0.0.0.0/0 is whitelisted in MongoDB Atlas -> Network Access.")
+        _last_failure_timestamp = time.time()
         _client = None
         _db_connected = False
         return None
@@ -392,12 +404,23 @@ def get_mongodb_status() -> Dict[str, Any]:
                 driver_count = db["drivers"].count_documents({})
         except Exception:
             pass
+    else:
+        try:
+            import sqlite3
+            from pathlib import Path
+            sqlite_db = Path(__file__).resolve().parent / "cognitive_data" / "cognitive.db"
+            if sqlite_db.exists():
+                with sqlite3.connect(sqlite_db) as conn:
+                    cur = conn.execute("SELECT COUNT(*) FROM encrypted_driver_profiles")
+                    driver_count = cur.fetchone()[0]
+        except Exception:
+            pass
 
     return {
         "database": "mongodb" if connected else "sqlite_fallback",
         "connected": connected,
         "uri_masked": mask_uri(uri),
         "driver_count": driver_count,
-        "status": "ONLINE (Connected to MongoDB)" if connected else "OFFLINE (Fallback to SQLite Storage)",
+        "status": "ONLINE (Connected to MongoDB)" if connected else "SQLite Encrypted Vault (Edge Operational)",
     }
 

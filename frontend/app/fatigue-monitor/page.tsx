@@ -1,13 +1,15 @@
 "use client";
 
-import { FaceMesh, Results, FACEMESH_TESSELATION, FACEMESH_CONTOURS } from "@mediapipe/face_mesh";
+import { FACEMESH_TESSELATION, FACEMESH_CONTOURS } from "@mediapipe/face_mesh";
+import type { FaceMesh, Results } from "@mediapipe/face_mesh";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { requestWebcamStream, releaseWebcamStream } from "../utils/camera";
-import { getFaceMeshLocateFile } from "../utils/mediapipe";
+import { getSharedFaceMesh, setSharedFaceMeshCallback } from "../utils/mediapipe";
 import { selectPrimaryDriverFace, smoothMetric, calculateMouthAspectRatio, calculateHeadPose } from "../utils/faceProcessing";
 import { CameraFaceOverlay } from "../components/CameraFaceOverlay";
 
-const API = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+import { getApiBaseUrl } from "../utils/api";
+const API = getApiBaseUrl();
 const distance = (a: { x: number; y: number }, b: { x: number; y: number }) =>
   Math.hypot(a.x - b.x, a.y - b.y);
 
@@ -269,9 +271,13 @@ export default function FatigueMonitor() {
           };
           v.srcObject = stream;
           try {
-            await v.play();
-          } catch (e) {
-            console.warn("Webcam direct play error:", e);
+            if (v.paused) {
+              await v.play();
+            }
+          } catch (e: any) {
+            if (e?.name !== "AbortError") {
+              console.warn("Webcam direct play error:", e);
+            }
           }
           if (canvasRef.current && v.videoWidth > 0) {
             canvasRef.current.width = v.videoWidth;
@@ -283,20 +289,13 @@ export default function FatigueMonitor() {
         setCameraError(null);
 
         if (!meshRef.current) {
-          const mesh = new FaceMesh({
-            locateFile: getFaceMeshLocateFile,
-          });
+          const mesh = await getSharedFaceMesh();
+          meshRef.current = mesh;
 
-          mesh.setOptions({
-          maxNumFaces: 3,
-          refineLandmarks: true,
-          minDetectionConfidence: 0.4,
-          minTrackingConfidence: 0.4,
-        });
-
-        mesh.onResults((result: Results) => {
-          // Select only the dominant front driver face, ignoring background faces/passengers
-          const p = selectPrimaryDriverFace(result.multiFaceLandmarks);
+          setSharedFaceMeshCallback((result: Results) => {
+            if (!runningRef.current) return;
+            // Select only the dominant front driver face, ignoring background faces/passengers
+            const p = selectPrimaryDriverFace(result.multiFaceLandmarks);
 
             if (!p || p.length === 0 || simulatedOutRef.current) {
               setFaceInFrame(false);
@@ -447,12 +446,6 @@ export default function FatigueMonitor() {
             }
           });
 
-          try {
-            await mesh.initialize();
-          } catch (e) {
-            console.warn("FaceMesh initialize error (will proceed):", e);
-          }
-
           meshRef.current = mesh;
         }
 
@@ -478,8 +471,8 @@ export default function FatigueMonitor() {
                 await v.play().catch(() => {});
               }
               await meshRef.current.send({ image: v });
-            } catch (err) {
-              console.warn("[FatigueMonitor] FaceMesh send error:", err);
+            } catch {
+              // Frame dropped safely
             } finally {
               isProcessingRef.current = false;
             }

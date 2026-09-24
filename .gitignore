@@ -57,3 +57,8 @@ Desktop.ini
 .vscode/*
 !.vscode/settings.json
 !.vscode/extensions.json
+
+# Private Local Documentation (Never pushed to GitHub)
+documents/
+/documents/
+

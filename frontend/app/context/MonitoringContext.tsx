@@ -64,7 +64,7 @@ const MonitoringContext = createContext<MonitoringContextType>({
   stopGlobalAlarm: () => {},
 });
 
-const API = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+import { getApiBaseUrl } from "../utils/api";
 
 export function MonitoringProvider({ children }: { children: React.ReactNode }) {
   const [isMonitoring, setIsMonitoring] = useState<boolean>(false);
@@ -309,7 +309,7 @@ export function MonitoringProvider({ children }: { children: React.ReactNode }) 
       // Asynchronously log the alarm event to backend Audit History
       try {
         const activeDrv = currentDriverRef.current;
-        fetch(`${API}/api/audit-log`, {
+        fetch(`${getApiBaseUrl()}/api/audit-log`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -344,7 +344,7 @@ export function MonitoringProvider({ children }: { children: React.ReactNode }) 
 
       // Log incident to backend (single dispatch per alarm event)
       const driverId = currentDriverRef.current?.driver_id || "DRIVER-001";
-      fetch(`${API}/api/report-incident`, {
+      fetch(`${getApiBaseUrl()}/api/report-incident`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -404,7 +404,7 @@ export function MonitoringProvider({ children }: { children: React.ReactNode }) 
 
     if (activeDrv) {
       try {
-        fetch(`${API}/api/audit-log`, {
+        fetch(`${getApiBaseUrl()}/api/audit-log`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
