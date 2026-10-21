@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg-main: #ffffff;
+    --card-surface: #ffffff;
+    --card-border: #e2e8f0;
+    --text-primary: #202122;
+    --text-secondary: #54595d;
+    --primary: #0066cc;
+    --primary-hover: #0052a3;
+    --secondary: #72777d;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    background-color: #ffffff;
+    color: #202122;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Simple, flat, unstylish card and table borders */
+.plain-box {
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+}
+
+/* Custom subtle scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #ffffff;
+}
+::-webkit-scrollbar-thumb {
+  background: #c8ccd1;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #72777d;
+}
+
+@keyframes biometricScan {
+  0% { top: 2%; opacity: 0.4; }
+  50% { opacity: 0.9; }
+  100% { top: 98%; opacity: 0.4; }
+}
+
+.biometric-scan-beam {
+  animation: biometricScan 3s ease-in-out infinite alternate;
+}
+
